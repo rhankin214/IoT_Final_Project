@@ -170,7 +170,7 @@ void setup() {
     } else {
       Serial.println("deserialization success");
       set_leds(in_doc);
-      delay(1000); //Sleep for one second so LED output is visible for longer
+      delay(1000); //delay for one second so LED output is visible for longer
     }
   }
 
