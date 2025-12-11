@@ -63,11 +63,15 @@ String get_url = "https://iot-ingest-func-henry-andzetf6gxafbef0.eastus2-01.azur
 #define RZERO 2870
 #define RLOAD 15
 
-#define hmd_led 2
-#define pressure_led 3
-#define ppm_led 4
+#define hmd_led 25
+#define pressure_led 33
+#define ppm_led 26
 
 #define data_points_per_get 7
+
+#define ppm_safe_range 600
+#define hmd_safe_range 70
+#define pa_safe_range 100900
 
 uint32_t lastTelemetryTime = 0;
 Adafruit_BMP280 bmp;
@@ -80,14 +84,21 @@ void set_leds(JsonDocument doc){
   float ppm_avg;
   
   for(int i = 0; i < data_points_per_get; i++){
-    hmd_avg += doc[i]["humidity"];
-    pressure_avg = doc[i]["pressure"];
-    ppm_avg = doc[i]["Air Quality"];
+    hmd_avg += float(doc[i]["humidity"]);
+    pressure_avg += float(doc[i]["pressure"]);
+    ppm_avg += float(doc[i]["air quality"]);
   }
 
   hmd_avg /= data_points_per_get;
   pressure_avg /= data_points_per_get;
   ppm_avg /= data_points_per_get;
+
+  Serial.println(String(hmd_avg) + " " + String(pressure_avg) + " " + String(ppm_avg));
+
+  digitalWrite(hmd_led, (hmd_avg > hmd_safe_range) ? HIGH : LOW);
+  digitalWrite(ppm_led, (ppm_avg > ppm_safe_range) ? HIGH : LOW);
+  digitalWrite(pressure_led, (pressure_avg < pa_safe_range) ? HIGH : LOW);
+  Serial.println("set LEDS");
   
 }
 
@@ -96,6 +107,14 @@ void setup() {
   bmp.begin();
   dht.begin();
   pinMode(MQ_SENSOR_PIN, INPUT);
+  pinMode(hmd_led, OUTPUT);
+  pinMode(ppm_led, OUTPUT);
+  pinMode(pressure_led, OUTPUT);
+  
+/*  digitalWrite(hmd_led, HIGH);
+  digitalWrite(ppm_led, HIGH);
+  digitalWrite(pressure_led, HIGH);
+*/  
   Serial.begin(9600);
 
   esp_sleep_enable_timer_wakeup(time_to_sleep * sec_to_us);
@@ -130,6 +149,33 @@ void setup() {
   Serial.println("MAC address: ");
   Serial.println(WiFi.macAddress());
 
+  HTTPClient http;
+
+  http.begin(get_url);
+  
+  ArduinoJson::JsonDocument in_doc;
+
+  int code = http.GET();
+  if(code == 200){
+    Serial.println("Got data");
+    Serial.println("size: " + http.getSize());
+    String input_buffer = http.getString();
+
+    DeserializationError error = deserializeJson(in_doc, input_buffer);
+
+    if(error){
+      Serial.println("deserialization fail.");
+      Serial.println(error.f_str());
+
+    } else {
+      Serial.println("deserialization success");
+      set_leds(in_doc);
+      delay(1000); //Sleep for one second so LED output is visible for longer
+    }
+  }
+
+  http.end();
+
   dht.read();
   float temp = dht.getTemperature();
   float pressure = bmp.readPressure();
@@ -156,7 +202,6 @@ void setup() {
 
   WiFiClientSecure client;
   client.setCACert(root_ca); // Set root CA certificate
-  HTTPClient http;
   http.begin(client, url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", SAS_TOKEN);
@@ -174,28 +219,6 @@ void setup() {
       Serial.println("Response: " + response);
     }
   }
-  http.end();
-
-  http.begin(get_url);
-
-  int code = http.GET();
-  if(code == 200){
-    Serial.println("Got data");
-    Serial.println("size: " + http.getSize());
-    String input_buffer = http.getString();
-
-    DeserializationError error = deserializeJson(doc, input_buffer);
-
-    if(error){
-      Serial.println("deserialization fail.");
-      Serial.println(error.f_str());
-
-    } else {
-      Serial.println("deserialization success");
-      set_leds(doc);
-    }
-  }
-
   http.end();
 
   Serial.flush();
