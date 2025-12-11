@@ -69,7 +69,7 @@ String get_url = "https://iot-ingest-func-henry-andzetf6gxafbef0.eastus2-01.azur
 
 #define data_points_per_get 7
 
-#define ppm_safe_range 600
+#define ppm_safe_range 1000
 #define hmd_safe_range 70
 #define pa_safe_range 100900
 
@@ -98,6 +98,11 @@ void set_leds(JsonDocument doc){
   digitalWrite(hmd_led, (hmd_avg > hmd_safe_range) ? HIGH : LOW);
   digitalWrite(ppm_led, (ppm_avg > ppm_safe_range) ? HIGH : LOW);
   digitalWrite(pressure_led, (pressure_avg < pa_safe_range) ? HIGH : LOW);
+
+  /*toggling version for demos*/
+  /*digitalWrite(hmd_led, !digitalRead(hmd_led));
+  digitalWrite(ppm_led, !digitalRead(ppm_led));
+  digitalWrite(pressure_led, !digitalRead(pressure_led));*/
   Serial.println("set LEDS");
   
 }
@@ -110,14 +115,6 @@ void setup() {
   pinMode(hmd_led, OUTPUT);
   pinMode(ppm_led, OUTPUT);
   pinMode(pressure_led, OUTPUT);
-  
-/*  digitalWrite(hmd_led, HIGH);
-  digitalWrite(ppm_led, HIGH);
-  digitalWrite(pressure_led, HIGH);
-*/  
-  Serial.begin(9600);
-
-  esp_sleep_enable_timer_wakeup(time_to_sleep * sec_to_us);
 
   WiFi.mode(WIFI_STA);
   delay(1000);
@@ -131,11 +128,41 @@ void setup() {
   int wifi_start_time = millis();
 
   while (WiFi.status() != WL_CONNECTED) {
-    if(millis() - wifi_start_time >= wifi_timeout){
+    /*if(millis() - wifi_start_time >= wifi_timeout){
       WiFi.disconnect();
       Serial.flush();
-      esp_deep_sleep_start();
-    }
+      esp_light_sleep_start();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      wifi_start_time = millis();
+    }*/
+
+    delay(500);
+    Serial.print(".");
+    Serial.print(WiFi.status());
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("MAC address: ");
+  Serial.println(WiFi.macAddress());
+  
+  Serial.begin(9600);
+  esp_sleep_enable_timer_wakeup(time_to_sleep * sec_to_us);
+}
+
+void loop(){
+  Serial.println(WiFi.status());
+
+  while (WiFi.status() != WL_CONNECTED) {
+    /*if(millis() - wifi_start_time >= wifi_timeout){
+      WiFi.disconnect();
+      Serial.flush();
+      esp_light_sleep_start();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      wifi_start_time = millis();
+    }*/
 
     delay(500);
     Serial.print(".");
@@ -170,7 +197,7 @@ void setup() {
     } else {
       Serial.println("deserialization success");
       set_leds(in_doc);
-      delay(1000); //delay for one second so LED output is visible for longer
+      
     }
   }
 
@@ -222,7 +249,13 @@ void setup() {
   http.end();
 
   Serial.flush();
-  esp_deep_sleep_start(); //on wakeup, setup is run again.
+  
+  WiFi.disconnect();
+  delay(500);
+  esp_light_sleep_start();
+  
+/*  int start_time = millis(); //non-disconnecting version for demo purposes.
+  while(millis() - start_time < 30000){
+    
+  }*/
 }
-
-void loop(){}
