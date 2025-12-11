@@ -115,38 +115,6 @@ void setup() {
   pinMode(hmd_led, OUTPUT);
   pinMode(ppm_led, OUTPUT);
   pinMode(pressure_led, OUTPUT);
-
-  WiFi.mode(WIFI_STA);
-  delay(1000);
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(WIFI_SSID);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  int wifi_start_time = millis();
-
-  while (WiFi.status() != WL_CONNECTED) {
-    /*if(millis() - wifi_start_time >= wifi_timeout){
-      WiFi.disconnect();
-      Serial.flush();
-      esp_light_sleep_start();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-      wifi_start_time = millis();
-    }*/
-
-    delay(500);
-    Serial.print(".");
-    Serial.print(WiFi.status());
-  }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("MAC address: ");
-  Serial.println(WiFi.macAddress());
   
   Serial.begin(9600);
   esp_sleep_enable_timer_wakeup(time_to_sleep * sec_to_us);
