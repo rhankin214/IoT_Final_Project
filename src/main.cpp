@@ -95,14 +95,14 @@ void set_leds(JsonDocument doc){
 
   Serial.println(String(hmd_avg) + " " + String(pressure_avg) + " " + String(ppm_avg));
 
-  digitalWrite(hmd_led, (hmd_avg > hmd_safe_range) ? HIGH : LOW);
+  /*digitalWrite(hmd_led, (hmd_avg > hmd_safe_range) ? HIGH : LOW);
   digitalWrite(ppm_led, (ppm_avg > ppm_safe_range) ? HIGH : LOW);
-  digitalWrite(pressure_led, (pressure_avg < pa_safe_range) ? HIGH : LOW);
+  digitalWrite(pressure_led, (pressure_avg < pa_safe_range) ? HIGH : LOW);*/
 
   /*toggling version for demos*/
-  /*digitalWrite(hmd_led, !digitalRead(hmd_led));
+  digitalWrite(hmd_led, !digitalRead(hmd_led));
   digitalWrite(ppm_led, !digitalRead(ppm_led));
-  digitalWrite(pressure_led, !digitalRead(pressure_led));*/
+  digitalWrite(pressure_led, !digitalRead(pressure_led));
   Serial.println("set LEDS");
   
 }
@@ -155,14 +155,14 @@ void setup() {
 void loop(){
   Serial.println(WiFi.status());
 
-  while (WiFi.status() != WL_CONNECTED) {
-    /*if(millis() - wifi_start_time >= wifi_timeout){
+  /*while (WiFi.status() != WL_CONNECTED) {
+    if(millis() - wifi_start_time >= wifi_timeout){
       WiFi.disconnect();
       Serial.flush();
       esp_light_sleep_start();
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
       wifi_start_time = millis();
-    }*/
+    }
 
     delay(500);
     Serial.print(".");
@@ -174,8 +174,7 @@ void loop(){
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
   Serial.println("MAC address: ");
-  Serial.println(WiFi.macAddress());
-
+  Serial.println(WiFi.macAddress());*/
   HTTPClient http;
 
   http.begin(get_url);
@@ -250,12 +249,12 @@ void loop(){
 
   Serial.flush();
   
-  WiFi.disconnect();
+  /*WiFi.disconnect();
   delay(500);
-  esp_light_sleep_start();
+  esp_light_sleep_start();*/
   
-/*  int start_time = millis(); //non-disconnecting version for demo purposes.
+  int start_time = millis(); //non-disconnecting version for demo purposes.
   while(millis() - start_time < 30000){
     
-  }*/
+  }
 }
