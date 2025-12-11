@@ -123,14 +123,18 @@ void setup() {
 void loop(){
   Serial.println(WiFi.status());
 
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  delay(500);
+  int wifi_start_time = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    /*if(millis() - wifi_start_time >= wifi_timeout){
+    if(millis() - wifi_start_time >= wifi_timeout){
       WiFi.disconnect();
+      delay(500);
       Serial.flush();
       esp_light_sleep_start();
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
       wifi_start_time = millis();
-    }*/
+    }
 
     delay(500);
     Serial.print(".");
