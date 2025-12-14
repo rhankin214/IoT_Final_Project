@@ -2,20 +2,34 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include "Adafruit_BMP280.h"
 #include "DHT20.h"
 #include <ArduinoJson.h>
-#include <string>
 #include <MQ135.h>
 
-#define WIFI_SSID "Goobernet" 
-#define WIFI_PASSWORD "givemetheinternet"
+// ===================== WiFi =====================
+#define WIFI_SSID "SETUP-797C"
+#define WIFI_PASSWORD "crumb3771bucket"
 
-// Azure IoT Hub configuration
+// ===================== Azure =====================
 #define SAS_TOKEN "SharedAccessSignature sr=cs147IotHub-hkeane.azure-devices.net%2Fdevices%2F147esp32&sig=cLnC56TRtS9n%2F9SJQdaEHwHEkipGBhvonFOlpgFrdH0%3D&se=1766288915"
 
-// Root CA certificate for Azure IoT Hub (DigiCert Global Root G2)
+String iothubName = "cs147IotHub-hkeane";
+String deviceName = "147esp32";
+
+String post_url =
+	"https://" + iothubName +
+	".azure-devices.net/devices/" +
+	deviceName +
+	"/messages/events?api-version=2021-04-12";
+
+String get_url =
+	"https://iot-ingest-func-henry-andzetf6gxafbef0.eastus2-01.azurewebsites.net/api/GetTelemetry?code=zTOCEMAPmJ4yVVbPqW0FZkEeXOh9M9LOJ-AczYnjlCkuAzFuZCuVSg==";
+
+// ===================== TLS Root CA =====================
+// Root CA certificate for Azure IoT Hub (DigiCert Global Root G2) 
 const char* root_ca = \
 "-----BEGIN CERTIFICATE-----\n" \
 "MIIEtjCCA56gAwIBAgIQCv1eRG9c89YADp5Gwibf9jANBgkqhkiG9w0BAQsFADBh\n" \
@@ -45,189 +59,160 @@ const char* root_ca = \
 "QFdB9BjjlA4ukAg2YkOyCiB8eXTBi2APaceh3+uBLIgLk8ysy52g2U3gP7Q26Jlg\n" \
 "q/xKzj3O9hFh/g==\n" \
 "-----END CERTIFICATE-----\n";
+// ===================== Timing =====================
+#define TELEMETRY_INTERVAL 60000
+#define WIFI_TIMEOUT 15000
+#define TIME_TO_SLEEP_SEC 30
+#define SEC_TO_US 1000000ULL
 
-String iothubName = "cs147IotHub-hkeane"; 
-String deviceName = "147esp32";
-String url = "https://" + iothubName + ".azure-devices.net/devices/" +
-             deviceName + "/messages/events?api-version=2021-04-12";
-
-String get_url = "https://iot-ingest-func-henry-andzetf6gxafbef0.eastus2-01.azurewebsites.net/api/GetTelemetry?code=zTOCEMAPmJ4yVVbPqW0FZkEeXOh9M9LOJ-AczYnjlCkuAzFuZCuVSg==";
-
-// Telemetry interval
-#define TELEMETRY_INTERVAL 60000 // Send data every 3 seconds
-#define time_to_sleep 30
-#define wifi_timeout 15000
-#define sec_to_us 1000000ULL
-
+// ===================== Pins =====================
 #define MQ_SENSOR_PIN 34
-#define RZERO 2870
-#define RLOAD 15
+#define HMD_LED 25
+#define PRESSURE_LED 33
+#define AQ_LED 26
 
-#define hmd_led 25
-#define pressure_led 33
-#define ppm_led 26
+// ===================== Thresholds =====================
+// These are RELATIVE, not ppm
+#define HUMIDITY_MAX 70.0
+#define PRESSURE_MIN 100900.0
+#define AQ_RELATIVE_THRESHOLD 1.30  // 30% above baseline
 
-#define data_points_per_get 7
+#define DATA_POINTS_PER_GET 7
 
-#define ppm_safe_range 1000
-#define hmd_safe_range 70
-#define pa_safe_range 100900
-
-uint32_t lastTelemetryTime = 0;
+// ===================== Globals =====================
 Adafruit_BMP280 bmp;
 DHT20 dht;
-MQ135 air_quality_sensor(MQ_SENSOR_PIN, RZERO, RLOAD);
+MQ135 mq135(MQ_SENSOR_PIN);
 
-void set_leds(JsonDocument doc){
-  float hmd_avg;
-  float pressure_avg;
-  float ppm_avg;
-  
-  for(int i = 0; i < data_points_per_get; i++){
-    hmd_avg += float(doc[i]["humidity"]);
-    pressure_avg += float(doc[i]["pressure"]);
-    ppm_avg += float(doc[i]["air quality"]);
-  }
+float aq_baseline = 0.0;
+bool baseline_initialized = false;
 
-  hmd_avg /= data_points_per_get;
-  pressure_avg /= data_points_per_get;
-  ppm_avg /= data_points_per_get;
-
-  Serial.println(String(hmd_avg) + " " + String(pressure_avg) + " " + String(ppm_avg));
-
-  digitalWrite(hmd_led, (hmd_avg > hmd_safe_range) ? HIGH : LOW);
-  digitalWrite(ppm_led, (ppm_avg > ppm_safe_range) ? HIGH : LOW);
-  digitalWrite(pressure_led, (pressure_avg < pa_safe_range) ? HIGH : LOW);
-
-  /*toggling version for demos*/
-  /*digitalWrite(hmd_led, !digitalRead(hmd_led));
-  digitalWrite(ppm_led, !digitalRead(ppm_led));
-  digitalWrite(pressure_led, !digitalRead(pressure_led));*/
-  Serial.println("set LEDS");
-  
+// ===================== Helpers =====================
+float read_air_quality_index() {
+	// Raw resistance-based index (stable & relative)
+	float r = mq135.getResistance();
+	return r;
 }
 
+void set_leds(JsonDocument& doc) {
+	float hmd_avg = 0.0;
+	float pressure_avg = 0.0;
+	float aq_avg = 0.0;
+
+	for (int i = 0; i < DATA_POINTS_PER_GET; i++) {
+		hmd_avg += float(doc[i]["humidity"]);
+		pressure_avg += float(doc[i]["pressure"]);
+		aq_avg += float(doc[i]["air_quality_index"]);
+	}
+
+	hmd_avg /= DATA_POINTS_PER_GET;
+	pressure_avg /= DATA_POINTS_PER_GET;
+	aq_avg /= DATA_POINTS_PER_GET;
+
+	Serial.printf("AVG → HMD: %.2f  P: %.2f  AQ_IDX: %.2f\n",
+				  hmd_avg, pressure_avg, aq_avg);
+
+	digitalWrite(HMD_LED, hmd_avg > HUMIDITY_MAX);
+	digitalWrite(PRESSURE_LED, pressure_avg < PRESSURE_MIN);
+	digitalWrite(AQ_LED, aq_avg > aq_baseline * AQ_RELATIVE_THRESHOLD);
+
+	Serial.println("LEDs updated");
+}
+
+// ===================== Setup =====================
 void setup() {
-  // put your setup code here, to run once:
-  bmp.begin();
-  dht.begin();
-  pinMode(MQ_SENSOR_PIN, INPUT);
-  pinMode(hmd_led, OUTPUT);
-  pinMode(ppm_led, OUTPUT);
-  pinMode(pressure_led, OUTPUT);
-  
-  Serial.begin(9600);
-  esp_sleep_enable_timer_wakeup(time_to_sleep * sec_to_us);
+	Serial.begin(9600);
+	delay(500);
+
+	bmp.begin();
+	dht.begin();
+
+	pinMode(MQ_SENSOR_PIN, INPUT);
+	pinMode(HMD_LED, OUTPUT);
+	pinMode(PRESSURE_LED, OUTPUT);
+	pinMode(AQ_LED, OUTPUT);
+
+	esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_SEC * SEC_TO_US);
+
+	// Establish AQ baseline (clean-ish air)
+	float sum = 0.0;
+	for (int i = 0; i < 20; i++) {
+		sum += read_air_quality_index();
+		delay(200);
+	}
+	aq_baseline = sum / 20.0;
+	baseline_initialized = true;
+
+	Serial.printf("AQ baseline established: %.2f\n", aq_baseline);
 }
 
-void loop(){
-  Serial.println(WiFi.status());
+// ===================== Loop =====================
+void loop() {
+	WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  delay(500);
-  int wifi_start_time = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if(millis() - wifi_start_time >= wifi_timeout){
-      WiFi.disconnect();
-      delay(500);
-      Serial.flush();
-      esp_light_sleep_start();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-      wifi_start_time = millis();
-    }
+	uint32_t start = millis();
+	while (WiFi.status() != WL_CONNECTED) {
+		if (millis() - start > WIFI_TIMEOUT) {
+			WiFi.disconnect();
+			esp_light_sleep_start();
+			return;
+		}
+		delay(500);
+		Serial.print(".");
+	}
 
-    delay(500);
-    Serial.print(".");
-    Serial.print(WiFi.status());
-  }
+	Serial.println("\nWiFi connected");
+	Serial.println(WiFi.localIP());
 
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("MAC address: ");
-  Serial.println(WiFi.macAddress());
+	// ---------- GET historical data ----------
+	HTTPClient http;
+	http.begin(get_url);
 
-  HTTPClient http;
+	JsonDocument in_doc;
+	if (http.GET() == 200) {
+		deserializeJson(in_doc, http.getString());
+		set_leds(in_doc);
+	}
+	http.end();
 
-  http.begin(get_url);
-  
-  ArduinoJson::JsonDocument in_doc;
+	// ---------- Read sensors ----------
+	dht.read();
+	float temp = dht.getTemperature();
+	float humidity = dht.getHumidity();
+	float pressure = bmp.readPressure();
+	float aq_index = read_air_quality_index();
 
-  int code = http.GET();
-  if(code == 200){
-    Serial.println("Got data");
-    Serial.println("size: " + http.getSize());
-    String input_buffer = http.getString();
+	// ---------- Build JSON ----------
+	JsonDocument out_doc;
+	out_doc["temperature"] = temp;
+	out_doc["humidity"] = humidity;
+	out_doc["pressure"] = pressure;
+	out_doc["air quality"] = aq_index; // air quality index
 
-    DeserializationError error = deserializeJson(in_doc, input_buffer);
+	char payload[256];
+	serializeJson(out_doc, payload, sizeof(payload));
 
-    if(error){
-      Serial.println("deserialization fail.");
-      Serial.println(error.f_str());
+	Serial.println("\nSending telemetry:");
+	Serial.println(payload);
 
-    } else {
-      Serial.println("deserialization success");
-      set_leds(in_doc);
-      
-    }
-  }
+	// ---------- POST to IoT Hub ----------
+	WiFiClientSecure client;
+	client.setCACert(root_ca);
 
-  http.end();
+	http.begin(client, post_url);
+	http.addHeader("Content-Type", "application/json");
+	http.addHeader("Authorization", SAS_TOKEN);
 
-  dht.read();
-  float temp = dht.getTemperature();
-  float pressure = bmp.readPressure();
-  float humidity = dht.getHumidity();
+	int code = http.POST(payload);
+	if (code == 204) {
+		Serial.println("✓ Telemetry sent");
+	} else {
+		Serial.printf("✗ Failed (%d)\n", code);
+	}
 
-  float air_quality = air_quality_sensor.getCorrectedPPM(temp, humidity);
+	http.end();
+	WiFi.disconnect();
 
-  Serial.println("\n=== Sending test telemetry ===");
-  Serial.println("Temperature: " + String(temp));
-  Serial.println("Pressure: " + String(pressure));
-  Serial.println("Humidity: " + String(humidity));
-  Serial.println("Air quality: " + String(air_quality));
-
-  ArduinoJson::JsonDocument doc;
-  doc["temperature"] = temp;
-  doc["humidity"] = humidity;
-  doc["pressure"] = pressure;
-  doc["air quality"] = air_quality;
-  char buffer[256];
-  serializeJson(doc, buffer, sizeof(buffer));
-  
-  Serial.println("JSON payload: " + String(buffer));
-  Serial.println("URL: " + url);
-
-  WiFiClientSecure client;
-  client.setCACert(root_ca); // Set root CA certificate
-  http.begin(client, url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", SAS_TOKEN);
-    
-  Serial.println("Sending POST request...");
-  int httpCode = http.POST(buffer);
-
-  if (httpCode == 204) { // IoT Hub returns 204 No Content for successful telemetry
-    Serial.println("✓ SUCCESS! Telemetry sent: " + String(buffer));
-  } else {
-    Serial.println("✗ FAILED to send telemetry.");
-    Serial.println("HTTP code: " + String(httpCode));
-    if (httpCode > 0) {
-      String response = http.getString();
-      Serial.println("Response: " + response);
-    }
-  }
-  http.end();
-
-  Serial.flush();
-  
-  WiFi.disconnect();
-  delay(500);
-  esp_light_sleep_start();
-  
-/*  int start_time = millis(); //non-disconnecting version for demo purposes.
-  while(millis() - start_time < 30000){
-    
-  }*/
+	Serial.flush();
+	esp_light_sleep_start();
 }
