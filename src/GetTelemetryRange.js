@@ -4,6 +4,10 @@ module.exports = async function (context, req) {
     const uri = process.env.MONGO_URI;
     const client = new MongoClient(uri);
 
+    // Air quality values on/after this date are scaled
+    const AIR_QUALITY_SCALE_FROM = new Date("2025-12-12T00:00:00Z");
+    const AIR_QUALITY_SCALE_FACTOR = 100;
+
     try {
         await client.connect();
         const db = client.db("iot");
@@ -21,7 +25,6 @@ module.exports = async function (context, req) {
                 }
             },
             {
-                // Add a YYYY-MM-DD string for grouping
                 $addFields: {
                     day: {
                         $dateToString: { format: "%Y-%m-%d", date: "$timestamp" }
@@ -71,13 +74,31 @@ module.exports = async function (context, req) {
 
         const docs = await col.aggregate(pipeline).toArray();
 
+        // 🔑 Normalize + scale air quality after cutoff
+        const normalized = docs.map(d => {
+            const rawAQ = d["air quality"] ?? null;
+
+            return {
+                timestamp: d.timestamp,
+                temperature: d.temperature,
+                humidity: d.humidity,
+                pressure: d.pressure,
+                "air quality":
+                    rawAQ === null
+                        ? null
+                        : d.timestamp >= AIR_QUALITY_SCALE_FROM
+                            ? rawAQ * AIR_QUALITY_SCALE_FACTOR
+                            : rawAQ
+            };
+        });
+
         context.res = {
             status: 200,
             headers: {
                 "Content-Type": "application/json",
                 "Access-Control-Allow-Origin": "*"
             },
-            body: docs
+            body: normalized
         };
 
     } catch (err) {
