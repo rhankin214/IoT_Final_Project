@@ -1,3 +1,7 @@
+// Hi!
+// Henry updated this file after the deadline because of some bugfixing and cleanup when setting it up on my balcony.
+// Please feel free to go back to the commit tagged `final-submission` if this edit is ineligible for grading.
+
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
